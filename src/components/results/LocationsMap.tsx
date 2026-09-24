@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo } from "react";
+import { Fragment, useEffect, useMemo } from "react";
 import { MapContainer, TileLayer, Marker, Popup, Polyline, useMap } from "react-leaflet";
 import L from "leaflet";
 import { HouseholdWorkplaces, LocationRecommendation } from "@/lib/anthropic/schema";
@@ -187,7 +187,7 @@ export default function LocationsMap({
           {workplaces.map((hh, i) => {
             const color = householdColor(i);
             return (
-              <div key={hh.householdId}>
+              <Fragment key={hh.householdId}>
                 {hh.spouse1Point && (
                   <Marker position={[hh.spouse1Point.lat, hh.spouse1Point.lon]} icon={spouseIcon(color, "S1")}>
                     <Popup>
@@ -224,7 +224,7 @@ export default function LocationsMap({
                     pathOptions={{ color, weight: 2, dashArray: "4 4" }}
                   />
                 )}
-              </div>
+              </Fragment>
             );
           })}
 
