@@ -89,21 +89,66 @@ export interface ResolvedLocation {
   precise: boolean;
 }
 
-// Recommended-area names are often descriptive ("South Oklahoma City (I-240
-// corridor)") rather than a real OSM place, so try progressively broader
-// fallbacks: the full description, a cleaned-up version, just the core city
-// name (stripping directional words), and finally the county (a real
-// administrative boundary, so it always resolves) - each broader step trades
-// precision for a guaranteed point, which callers should treat as approximate.
-async function resolveLocationPoint(loc: LocationRecommendation): Promise<ResolvedLocation | null> {
-  const specific = [`${loc.cityArea}, ${loc.county}, Oklahoma`, `${loc.cityArea}, Oklahoma`];
+function segmentsOf(text: string): string[] {
+  return text
+    .split(/\/|,/)
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0);
+}
+
+// The model sometimes reuses the same broad `cityArea` (e.g. "Oklahoma City")
+// for two different recommendations, distinguishing them only in the more
+// descriptive `name` field (e.g. "Central OKC (Crown Heights / Mesta Park)"
+// vs. "Warr Acres / Bethany / NW OKC") - geocoding cityArea alone would then
+// collapse both onto the same point. So try the specific neighborhood names
+// inside `name` (its parenthetical first, then its own segments) before
+// falling back to cityArea, and only fall back to the county centroid - a
+// real administrative boundary that always resolves - as an absolute last
+// resort. Each broader step trades precision for a guaranteed point, which
+// callers should treat as approximate.
+const MIN_SEPARATION_DEG = 0.02; // ~1.4 miles - keeps the 3 recommendations visibly distinct
+
+function isTooClose(point: GeoPoint, avoid: GeoPoint[]): boolean {
+  return avoid.some(
+    (p) => Math.abs(p.lat - point.lat) < MIN_SEPARATION_DEG && Math.abs(p.lon - point.lon) < MIN_SEPARATION_DEG,
+  );
+}
+
+async function resolveLocationPoint(
+  loc: LocationRecommendation,
+  avoid: GeoPoint[],
+): Promise<ResolvedLocation | null> {
+  const specific: string[] = [];
+
+  const nameParen = loc.name.match(/\(([^)]+)\)/)?.[1];
+  if (nameParen) {
+    for (const segment of segmentsOf(nameParen)) {
+      specific.push(`${segment.replace(/\barea\b/gi, "").trim()}, Oklahoma`);
+    }
+  }
+  const nameWithoutParen = loc.name.replace(/\([^)]*\)/g, "").trim();
+  for (const segment of segmentsOf(nameWithoutParen)) {
+    if (segment.length > 2) specific.push(`${segment}, Oklahoma`);
+  }
+
+  specific.push(`${loc.cityArea}, ${loc.county}, Oklahoma`, `${loc.cityArea}, Oklahoma`);
   const normalized = normalizeAreaName(loc.cityArea);
   if (normalized && normalized !== loc.cityArea) specific.push(`${normalized}, Oklahoma`);
+  for (const segment of segmentsOf(normalized)) {
+    if (segment !== normalized) specific.push(`${segment}, Oklahoma`);
+  }
+
+  // Track the first point that resolves at all, even if it collides with an
+  // already-placed location - better to show a marker (the map nudges
+  // overlapping pins apart visually) than to show none.
+  let fallback: ResolvedLocation | null = null;
 
   for (const candidate of specific) {
     const point = await geocodeLocation(candidate);
     await sleep(1100);
-    if (point) return { point, precise: true };
+    if (!point) continue;
+    if (!fallback) fallback = { point, precise: true };
+    if (!isTooClose(point, avoid)) return { point, precise: true };
   }
 
   const coreCity = normalized.replace(DIRECTIONAL_PREFIX, "").trim();
@@ -114,9 +159,11 @@ async function resolveLocationPoint(loc: LocationRecommendation): Promise<Resolv
   for (const candidate of broad) {
     const point = await geocodeLocation(candidate);
     await sleep(1100);
-    if (point) return { point, precise: false };
+    if (!point) continue;
+    if (!fallback) fallback = { point, precise: false };
+    if (!isTooClose(point, avoid)) return { point, precise: false };
   }
-  return null;
+  return fallback;
 }
 
 interface SpouseCommute {
@@ -129,8 +176,11 @@ export async function enrichWithRealCommutes(
   result: AnalysisResult,
 ): Promise<AnalysisResult> {
   const resolvedLocations: (ResolvedLocation | null)[] = [];
+  const acceptedPoints: GeoPoint[] = [];
   for (const loc of result.locations) {
-    resolvedLocations.push(await resolveLocationPoint(loc));
+    const resolved = await resolveLocationPoint(loc, acceptedPoints);
+    resolvedLocations.push(resolved);
+    if (resolved) acceptedPoints.push(resolved.point);
   }
 
   const spouseQueries = households.flatMap((h) => [

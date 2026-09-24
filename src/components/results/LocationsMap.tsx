@@ -6,6 +6,7 @@ import L from "leaflet";
 import { LocationRecommendation } from "@/lib/anthropic/schema";
 
 const OKC_METRO_CENTER: [number, number] = [35.35, -97.45];
+const OVERLAP_THRESHOLD_DEG = 0.01; // ~0.7 miles
 
 function markerIcon(rank: number) {
   const isTopPick = rank === 1;
@@ -24,17 +25,55 @@ function markerIcon(rank: number) {
   });
 }
 
+interface DisplayPin {
+  location: LocationRecommendation;
+  position: [number, number];
+  nudged: boolean;
+}
+
+// Two locations can legitimately resolve to (near) the same point - e.g. both
+// only matched at county level. Rather than let one marker hide the other,
+// spread them apart visually (in a small spiral) so every recommendation is
+// always clickable; the underlying commute data is untouched by this.
+function computeDisplayPins(locations: LocationRecommendation[]): DisplayPin[] {
+  const placed: [number, number][] = [];
+  const pins: DisplayPin[] = [];
+
+  for (const location of locations) {
+    if (!location.coordinates) continue;
+    let lat = location.coordinates.lat;
+    let lon = location.coordinates.lon;
+    let attempt = 0;
+    while (
+      placed.some(
+        ([pLat, pLon]) =>
+          Math.abs(pLat - lat) < OVERLAP_THRESHOLD_DEG && Math.abs(pLon - lon) < OVERLAP_THRESHOLD_DEG,
+      )
+    ) {
+      attempt += 1;
+      const angle = (attempt * 137.5 * Math.PI) / 180;
+      const radius = 0.015 * attempt;
+      lat = location.coordinates.lat + radius * Math.cos(angle);
+      lon = location.coordinates.lon + radius * Math.sin(angle);
+    }
+    placed.push([lat, lon]);
+    pins.push({ location, position: [lat, lon], nudged: attempt > 0 });
+  }
+
+  return pins;
+}
+
 export default function LocationsMap({ locations }: { locations: LocationRecommendation[] }) {
-  const withCoordinates = locations.filter((loc) => loc.coordinates);
+  const pins = useMemo(() => computeDisplayPins(locations), [locations]);
 
   const center = useMemo<[number, number]>(() => {
-    if (withCoordinates.length === 0) return OKC_METRO_CENTER;
-    const lat = withCoordinates.reduce((sum, l) => sum + l.coordinates!.lat, 0) / withCoordinates.length;
-    const lon = withCoordinates.reduce((sum, l) => sum + l.coordinates!.lon, 0) / withCoordinates.length;
+    if (pins.length === 0) return OKC_METRO_CENTER;
+    const lat = pins.reduce((sum, p) => sum + p.position[0], 0) / pins.length;
+    const lon = pins.reduce((sum, p) => sum + p.position[1], 0) / pins.length;
     return [lat, lon];
-  }, [withCoordinates]);
+  }, [pins]);
 
-  if (withCoordinates.length === 0) {
+  if (pins.length === 0) {
     return (
       <div className="flex h-64 items-center justify-center rounded-2xl border border-stone-200 bg-stone-50 text-sm text-stone-400">
         Map unavailable - locations could not be geocoded.
@@ -49,18 +88,22 @@ export default function LocationsMap({ locations }: { locations: LocationRecomme
           attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
           url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
         />
-        {withCoordinates.map((location) => (
-          <Marker
-            key={location.rank}
-            position={[location.coordinates!.lat, location.coordinates!.lon]}
-            icon={markerIcon(location.rank)}
-          >
+        {pins.map(({ location, position, nudged }) => (
+          <Marker key={location.rank} position={position} icon={markerIcon(location.rank)}>
             <Popup>
               <span className="font-medium">
                 #{location.rank} {location.name}
               </span>
               <br />
               {location.cityArea} · {location.county}
+              {nudged && (
+                <>
+                  <br />
+                  <span className="text-xs text-stone-500">
+                    Position adjusted slightly so it doesn&apos;t overlap another pin.
+                  </span>
+                </>
+              )}
             </Popup>
           </Marker>
         ))}
