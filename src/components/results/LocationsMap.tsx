@@ -3,12 +3,13 @@
 import { useEffect, useMemo } from "react";
 import { MapContainer, TileLayer, Marker, Popup, Polyline, useMap } from "react-leaflet";
 import L from "leaflet";
-import { HouseholdMidpoint, LocationRecommendation } from "@/lib/anthropic/schema";
+import { HouseholdWorkplaces, LocationRecommendation } from "@/lib/anthropic/schema";
 
 const OKC_METRO_CENTER: [number, number] = [35.35, -97.45];
 const OVERLAP_THRESHOLD_DEG = 0.01; // ~0.7 miles
 
 const HOUSEHOLD_COLORS = ["#2563eb", "#dc2626", "#9333ea", "#ea580c", "#0891b2"];
+const MIDPOINT_COLOR = "#b45309"; // amber - distinct from household colors and recommendation pins
 
 function householdColor(index: number): string {
   return HOUSEHOLD_COLORS[index % HOUSEHOLD_COLORS.length];
@@ -46,17 +47,17 @@ function spouseIcon(color: string, label: string) {
   });
 }
 
-function midpointIcon(color: string) {
+function midpointIcon() {
   return L.divIcon({
     className: "",
     html: `<div style="
-      width:13px;height:13px;background:${color};
+      width:16px;height:16px;background:${MIDPOINT_COLOR};
       transform:rotate(45deg);
-      border:2px solid white;box-shadow:0 1px 2px rgba(0,0,0,0.35);
+      border:2.5px solid white;box-shadow:0 1px 3px rgba(0,0,0,0.4);
     "></div>`,
-    iconSize: [13, 13],
-    iconAnchor: [7, 7],
-    popupAnchor: [0, -7],
+    iconSize: [16, 16],
+    iconAnchor: [8, 8],
+    popupAnchor: [0, -8],
   });
 }
 
@@ -113,22 +114,28 @@ function FitBounds({ points }: { points: [number, number][] }) {
 
 interface LocationsMapProps {
   locations: LocationRecommendation[];
-  householdMidpoints?: HouseholdMidpoint[] | null;
+  householdWorkplaces?: HouseholdWorkplaces[] | null;
+  combinedWorkplaceMidpoint?: { lat: number; lon: number } | null;
 }
 
-export default function LocationsMap({ locations, householdMidpoints }: LocationsMapProps) {
+export default function LocationsMap({
+  locations,
+  householdWorkplaces,
+  combinedWorkplaceMidpoint,
+}: LocationsMapProps) {
   const pins = useMemo(() => computeDisplayPins(locations), [locations]);
-  const midpoints = useMemo(() => householdMidpoints ?? [], [householdMidpoints]);
+  const workplaces = useMemo(() => householdWorkplaces ?? [], [householdWorkplaces]);
+  const midpoint = combinedWorkplaceMidpoint ?? null;
 
   const allPoints = useMemo<[number, number][]>(() => {
     const points: [number, number][] = pins.map((p) => p.position);
-    for (const hh of midpoints) {
+    for (const hh of workplaces) {
       if (hh.spouse1Point) points.push([hh.spouse1Point.lat, hh.spouse1Point.lon]);
       if (hh.spouse2Point) points.push([hh.spouse2Point.lat, hh.spouse2Point.lon]);
-      if (hh.midpoint) points.push([hh.midpoint.lat, hh.midpoint.lon]);
     }
+    if (midpoint) points.push([midpoint.lat, midpoint.lon]);
     return points;
-  }, [pins, midpoints]);
+  }, [pins, workplaces, midpoint]);
 
   const center = useMemo<[number, number]>(() => {
     if (allPoints.length === 0) return OKC_METRO_CENTER;
@@ -145,7 +152,7 @@ export default function LocationsMap({ locations, householdMidpoints }: Location
     );
   }
 
-  const hasMidpoints = midpoints.some((hh) => hh.spouse1Point || hh.spouse2Point);
+  const hasWorkplaces = workplaces.some((hh) => hh.spouse1Point || hh.spouse2Point);
 
   return (
     <div className="space-y-2">
@@ -177,7 +184,7 @@ export default function LocationsMap({ locations, householdMidpoints }: Location
             </Marker>
           ))}
 
-          {midpoints.map((hh, i) => {
+          {workplaces.map((hh, i) => {
             const color = householdColor(i);
             return (
               <div key={hh.householdId}>
@@ -199,29 +206,20 @@ export default function LocationsMap({ locations, householdMidpoints }: Location
                     </Popup>
                   </Marker>
                 )}
-                {hh.midpoint && (
-                  <Marker position={[hh.midpoint.lat, hh.midpoint.lon]} icon={midpointIcon(color)}>
-                    <Popup>
-                      <span className="font-medium">{hh.householdName}</span>
-                      <br />
-                      Midpoint between both workplaces
-                    </Popup>
-                  </Marker>
-                )}
-                {hh.spouse1Point && hh.midpoint && (
+                {midpoint && hh.spouse1Point && (
                   <Polyline
                     positions={[
                       [hh.spouse1Point.lat, hh.spouse1Point.lon],
-                      [hh.midpoint.lat, hh.midpoint.lon],
+                      [midpoint.lat, midpoint.lon],
                     ]}
                     pathOptions={{ color, weight: 2, dashArray: "4 4" }}
                   />
                 )}
-                {hh.spouse2Point && hh.midpoint && (
+                {midpoint && hh.spouse2Point && (
                   <Polyline
                     positions={[
                       [hh.spouse2Point.lat, hh.spouse2Point.lon],
-                      [hh.midpoint.lat, hh.midpoint.lon],
+                      [midpoint.lat, midpoint.lon],
                     ]}
                     pathOptions={{ color, weight: 2, dashArray: "4 4" }}
                   />
@@ -229,10 +227,20 @@ export default function LocationsMap({ locations, householdMidpoints }: Location
               </div>
             );
           })}
+
+          {midpoint && (
+            <Marker position={[midpoint.lat, midpoint.lon]} icon={midpointIcon()}>
+              <Popup>
+                <span className="font-medium">Combined workplace midpoint</span>
+                <br />
+                The geographic center of every spouse&apos;s workplace across all households.
+              </Popup>
+            </Marker>
+          )}
         </MapContainer>
       </div>
 
-      {hasMidpoints && (
+      {hasWorkplaces && (
         <div className="flex flex-wrap items-center gap-x-4 gap-y-1 px-1 text-xs text-stone-500">
           <span className="flex items-center gap-1.5">
             <span className="inline-block h-3 w-3 rounded-full bg-stone-600" />
@@ -240,13 +248,15 @@ export default function LocationsMap({ locations, householdMidpoints }: Location
           </span>
           <span className="flex items-center gap-1.5">
             <span className="inline-block h-3 w-3 rounded-full bg-stone-400" />
-            Spouse workplace (S1/S2)
+            Spouse workplace (S1/S2), colored by household
           </span>
           <span className="flex items-center gap-1.5">
-            <span className="inline-block h-2.5 w-2.5 rotate-45 bg-stone-400" />
-            Workplace midpoint
+            <span
+              className="inline-block h-2.5 w-2.5 rotate-45"
+              style={{ backgroundColor: MIDPOINT_COLOR }}
+            />
+            Combined midpoint (all households)
           </span>
-          <span>Colors group each household&apos;s workplaces with its midpoint.</span>
         </div>
       )}
     </div>

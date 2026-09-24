@@ -79,16 +79,15 @@ interface GeoPoint {
   lon: number;
 }
 
-// A geographic midpoint between one household's two spouse workplaces - a
-// plain calculation, unrelated to the AI's location recommendations. Filled
-// in server-side from the same geocoding already done for commute times; the
-// model never sets this, so it's not part of analysisResultSchema above.
-export interface HouseholdMidpoint {
+// Every spouse workplace pin for one household - a plain geocoding result,
+// unrelated to the AI's location recommendations. Filled in server-side from
+// the same geocoding already done for commute times; the model never sets
+// this, so it's not part of analysisResultSchema above.
+export interface HouseholdWorkplaces {
   householdId: string;
   householdName: string;
   spouse1Point: GeoPoint | null;
   spouse2Point: GeoPoint | null;
-  midpoint: GeoPoint | null;
 }
 
 export type CompatibilityLevel = z.infer<typeof compatibilityLevelSchema>;
@@ -96,11 +95,14 @@ export type HouseholdCompatibility = z.infer<typeof householdCompatibilitySchema
 export type HouseholdBreakdown = z.infer<typeof householdBreakdownSchema>;
 export type LocationRecommendation = z.infer<typeof locationRecommendationSchema>;
 
-// The model only produces analysisResultSchema's shape; excludedForCommute
-// and householdMidpoints are added server-side afterward (see
-// selectTopLocations / enrichWithRealCommutes) and were never part of the
-// schema Claude had to satisfy.
+// The model only produces analysisResultSchema's shape; everything below is
+// added server-side afterward (see selectTopLocations / enrichWithRealCommutes)
+// and was never part of the schema Claude had to satisfy.
 export type AnalysisResult = z.infer<typeof analysisResultSchema> & {
   excludedForCommute?: number | null;
-  householdMidpoints?: HouseholdMidpoint[] | null;
+  // Every spouse workplace, grouped by household for pin coloring.
+  householdWorkplaces?: HouseholdWorkplaces[] | null;
+  // ONE combined midpoint across every spouse workplace from every
+  // household - not one per household.
+  combinedWorkplaceMidpoint?: GeoPoint | null;
 };

@@ -111,13 +111,19 @@ async function queryNominatim(query: string): Promise<NominatimResult[]> {
 // which matters more here than the "importance" field (a general-fame score
 // that penalizes specific landmarks like a single office building) - but a
 // same-named place far outside the metro is a wrong match regardless of rank,
-// so skip past it to the next in-metro candidate rather than trusting rank 0.
+// so skip past it to the next in-metro candidate. If NONE of this query's
+// results are in-metro, still return the top-ranked one rather than nothing -
+// a spouse can genuinely work outside the metro (or a workplace can sit right
+// at the radius edge), and a real distant pin/commute beats a missing one.
+// The viewbox bias above already does most of the work steering ambiguous,
+// same-named queries (e.g. "Choctaw") toward the OKC-metro match first.
 function pickBestResult(results: NominatimResult[]): NominatimResult | null {
+  if (results.length === 0) return null;
   for (const result of results) {
     const point = { lat: parseFloat(result.lat), lon: parseFloat(result.lon) };
     if (isWithinMetro(point)) return result;
   }
-  return null;
+  return results[0];
 }
 
 function extractParenthetical(text: string): string | null {
