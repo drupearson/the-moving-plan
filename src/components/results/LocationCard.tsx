@@ -43,15 +43,6 @@ export function LocationCard({ location }: { location: LocationRecommendation })
               {location.cityArea} · {location.county}
             </p>
           </div>
-          <a
-            href={zillowSearchUrl(location)}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="flex shrink-0 items-center gap-1 rounded-lg border border-stone-200 px-3 py-1.5 text-xs font-medium text-stone-600 hover:border-emerald-300 hover:text-emerald-700"
-          >
-            Search listings
-            <ExternalLink className="h-3 w-3" />
-          </a>
         </div>
 
         <p className="text-sm leading-relaxed text-stone-700">{location.summary}</p>
@@ -70,10 +61,25 @@ export function LocationCard({ location }: { location: LocationRecommendation })
         <div className="grid gap-5 sm:grid-cols-2">
           {location.housingConsiderations.trim() && (
             <div>
-              <p className="text-xs font-medium uppercase tracking-wide text-stone-400">
-                Housing &amp; acreage
-              </p>
+              <div className="flex items-center justify-between gap-2">
+                <p className="text-xs font-medium uppercase tracking-wide text-stone-400">
+                  Housing &amp; acreage
+                </p>
+                <a
+                  href={zillowSearchUrl(location)}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex shrink-0 items-center gap-1 text-xs font-medium text-emerald-700 hover:text-emerald-800"
+                >
+                  See current listings
+                  <ExternalLink className="h-3 w-3" />
+                </a>
+              </div>
               <p className="mt-1 text-sm text-stone-700">{location.housingConsiderations}</p>
+              <p className="mt-1 text-xs text-stone-400">
+                For land/lot-only results, use Zillow&apos;s own property-type filter once there -
+                a reliable direct link isn&apos;t available.
+              </p>
             </div>
           )}
           {location.majorCompromises.length > 0 && (
