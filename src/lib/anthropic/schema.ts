@@ -60,19 +60,47 @@ export const locationRecommendationSchema = z.object({
   locationApproximate: z.boolean().nullable().optional(),
 });
 
+// This is the schema actually sent to Claude for structured-output
+// constrained decoding (via zodOutputFormat). Keep it as lean as possible -
+// Claude compiles it into a grammar, and a schema that's too large/complex
+// (e.g. an array length range instead of an exact count, or extra
+// server-only fields the model never touches) can be flatly rejected with
+// "compiled grammar is too large". Anything the server fills in after the
+// model responds - coordinates, drive times, midpoints - should live on the
+// plain TypeScript type below instead, not in this zod schema, unless the
+// model must be able to omit it (hence .nullable().optional() on those few).
 export const analysisResultSchema = z.object({
-  // The model is asked for 5 candidates (tolerate a few more/fewer so a minor
-  // miscount doesn't fail the whole request); the server then drops any that
-  // violate a household's stated maximum commute and returns up to 3 that pass.
-  locations: z.array(locationRecommendationSchema).min(3).max(7),
+  locations: z.array(locationRecommendationSchema).length(5),
   overallNotes: z.string(),
-  // Filled in server-side when candidates were dropped for exceeding a
-  // household's stated maximum commute; the model never sets this.
-  excludedForCommute: z.number().int().nullable().optional(),
 });
+
+interface GeoPoint {
+  lat: number;
+  lon: number;
+}
+
+// A geographic midpoint between one household's two spouse workplaces - a
+// plain calculation, unrelated to the AI's location recommendations. Filled
+// in server-side from the same geocoding already done for commute times; the
+// model never sets this, so it's not part of analysisResultSchema above.
+export interface HouseholdMidpoint {
+  householdId: string;
+  householdName: string;
+  spouse1Point: GeoPoint | null;
+  spouse2Point: GeoPoint | null;
+  midpoint: GeoPoint | null;
+}
 
 export type CompatibilityLevel = z.infer<typeof compatibilityLevelSchema>;
 export type HouseholdCompatibility = z.infer<typeof householdCompatibilitySchema>;
 export type HouseholdBreakdown = z.infer<typeof householdBreakdownSchema>;
 export type LocationRecommendation = z.infer<typeof locationRecommendationSchema>;
-export type AnalysisResult = z.infer<typeof analysisResultSchema>;
+
+// The model only produces analysisResultSchema's shape; excludedForCommute
+// and householdMidpoints are added server-side afterward (see
+// selectTopLocations / enrichWithRealCommutes) and were never part of the
+// schema Claude had to satisfy.
+export type AnalysisResult = z.infer<typeof analysisResultSchema> & {
+  excludedForCommute?: number | null;
+  householdMidpoints?: HouseholdMidpoint[] | null;
+};

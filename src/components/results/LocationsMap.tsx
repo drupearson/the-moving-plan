@@ -1,12 +1,18 @@
 "use client";
 
-import { useMemo } from "react";
-import { MapContainer, TileLayer, Marker, Popup } from "react-leaflet";
+import { useEffect, useMemo } from "react";
+import { MapContainer, TileLayer, Marker, Popup, Polyline, useMap } from "react-leaflet";
 import L from "leaflet";
-import { LocationRecommendation } from "@/lib/anthropic/schema";
+import { HouseholdMidpoint, LocationRecommendation } from "@/lib/anthropic/schema";
 
 const OKC_METRO_CENTER: [number, number] = [35.35, -97.45];
 const OVERLAP_THRESHOLD_DEG = 0.01; // ~0.7 miles
+
+const HOUSEHOLD_COLORS = ["#2563eb", "#dc2626", "#9333ea", "#ea580c", "#0891b2"];
+
+function householdColor(index: number): string {
+  return HOUSEHOLD_COLORS[index % HOUSEHOLD_COLORS.length];
+}
 
 function markerIcon(rank: number) {
   const isTopPick = rank === 1;
@@ -22,6 +28,35 @@ function markerIcon(rank: number) {
     iconSize: [28, 28],
     iconAnchor: [14, 14],
     popupAnchor: [0, -14],
+  });
+}
+
+function spouseIcon(color: string, label: string) {
+  return L.divIcon({
+    className: "",
+    html: `<div style="
+      display:flex;align-items:center;justify-content:center;
+      width:20px;height:20px;border-radius:9999px;
+      background:${color};color:white;font-size:9px;font-weight:700;
+      border:2px solid white;box-shadow:0 1px 2px rgba(0,0,0,0.35);
+    ">${label}</div>`,
+    iconSize: [20, 20],
+    iconAnchor: [10, 10],
+    popupAnchor: [0, -10],
+  });
+}
+
+function midpointIcon(color: string) {
+  return L.divIcon({
+    className: "",
+    html: `<div style="
+      width:13px;height:13px;background:${color};
+      transform:rotate(45deg);
+      border:2px solid white;box-shadow:0 1px 2px rgba(0,0,0,0.35);
+    "></div>`,
+    iconSize: [13, 13],
+    iconAnchor: [7, 7],
+    popupAnchor: [0, -7],
   });
 }
 
@@ -63,17 +98,46 @@ function computeDisplayPins(locations: LocationRecommendation[]): DisplayPin[] {
   return pins;
 }
 
-export default function LocationsMap({ locations }: { locations: LocationRecommendation[] }) {
+function FitBounds({ points }: { points: [number, number][] }) {
+  const map = useMap();
+  useEffect(() => {
+    if (points.length === 0) return;
+    if (points.length === 1) {
+      map.setView(points[0], 11);
+      return;
+    }
+    map.fitBounds(L.latLngBounds(points), { padding: [32, 32] });
+  }, [map, points]);
+  return null;
+}
+
+interface LocationsMapProps {
+  locations: LocationRecommendation[];
+  householdMidpoints?: HouseholdMidpoint[] | null;
+}
+
+export default function LocationsMap({ locations, householdMidpoints }: LocationsMapProps) {
   const pins = useMemo(() => computeDisplayPins(locations), [locations]);
+  const midpoints = useMemo(() => householdMidpoints ?? [], [householdMidpoints]);
+
+  const allPoints = useMemo<[number, number][]>(() => {
+    const points: [number, number][] = pins.map((p) => p.position);
+    for (const hh of midpoints) {
+      if (hh.spouse1Point) points.push([hh.spouse1Point.lat, hh.spouse1Point.lon]);
+      if (hh.spouse2Point) points.push([hh.spouse2Point.lat, hh.spouse2Point.lon]);
+      if (hh.midpoint) points.push([hh.midpoint.lat, hh.midpoint.lon]);
+    }
+    return points;
+  }, [pins, midpoints]);
 
   const center = useMemo<[number, number]>(() => {
-    if (pins.length === 0) return OKC_METRO_CENTER;
-    const lat = pins.reduce((sum, p) => sum + p.position[0], 0) / pins.length;
-    const lon = pins.reduce((sum, p) => sum + p.position[1], 0) / pins.length;
+    if (allPoints.length === 0) return OKC_METRO_CENTER;
+    const lat = allPoints.reduce((sum, p) => sum + p[0], 0) / allPoints.length;
+    const lon = allPoints.reduce((sum, p) => sum + p[1], 0) / allPoints.length;
     return [lat, lon];
-  }, [pins]);
+  }, [allPoints]);
 
-  if (pins.length === 0) {
+  if (allPoints.length === 0) {
     return (
       <div className="flex h-64 items-center justify-center rounded-2xl border border-stone-200 bg-stone-50 text-sm text-stone-400">
         Map unavailable - locations could not be geocoded.
@@ -81,33 +145,110 @@ export default function LocationsMap({ locations }: { locations: LocationRecomme
     );
   }
 
+  const hasMidpoints = midpoints.some((hh) => hh.spouse1Point || hh.spouse2Point);
+
   return (
-    <div className="h-80 overflow-hidden rounded-2xl border border-stone-200 shadow-sm">
-      <MapContainer center={center} zoom={9} scrollWheelZoom={false} className="h-full w-full">
-        <TileLayer
-          attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-          url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-        />
-        {pins.map(({ location, position, nudged }) => (
-          <Marker key={location.rank} position={position} icon={markerIcon(location.rank)}>
-            <Popup>
-              <span className="font-medium">
-                #{location.rank} {location.name}
-              </span>
-              <br />
-              {location.cityArea} · {location.county}
-              {nudged && (
-                <>
-                  <br />
-                  <span className="text-xs text-stone-500">
-                    Position adjusted slightly so it doesn&apos;t overlap another pin.
-                  </span>
-                </>
-              )}
-            </Popup>
-          </Marker>
-        ))}
-      </MapContainer>
+    <div className="space-y-2">
+      <div className="h-80 overflow-hidden rounded-2xl border border-stone-200 shadow-sm">
+        <MapContainer center={center} zoom={9} scrollWheelZoom={false} className="h-full w-full">
+          <TileLayer
+            attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+            url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+          />
+          <FitBounds points={allPoints} />
+
+          {pins.map(({ location, position, nudged }) => (
+            <Marker key={`loc-${location.rank}`} position={position} icon={markerIcon(location.rank)}>
+              <Popup>
+                <span className="font-medium">
+                  #{location.rank} {location.name}
+                </span>
+                <br />
+                {location.cityArea} · {location.county}
+                {nudged && (
+                  <>
+                    <br />
+                    <span className="text-xs text-stone-500">
+                      Position adjusted slightly so it doesn&apos;t overlap another pin.
+                    </span>
+                  </>
+                )}
+              </Popup>
+            </Marker>
+          ))}
+
+          {midpoints.map((hh, i) => {
+            const color = householdColor(i);
+            return (
+              <div key={hh.householdId}>
+                {hh.spouse1Point && (
+                  <Marker position={[hh.spouse1Point.lat, hh.spouse1Point.lon]} icon={spouseIcon(color, "S1")}>
+                    <Popup>
+                      <span className="font-medium">{hh.householdName}</span>
+                      <br />
+                      Spouse 1 workplace
+                    </Popup>
+                  </Marker>
+                )}
+                {hh.spouse2Point && (
+                  <Marker position={[hh.spouse2Point.lat, hh.spouse2Point.lon]} icon={spouseIcon(color, "S2")}>
+                    <Popup>
+                      <span className="font-medium">{hh.householdName}</span>
+                      <br />
+                      Spouse 2 workplace
+                    </Popup>
+                  </Marker>
+                )}
+                {hh.midpoint && (
+                  <Marker position={[hh.midpoint.lat, hh.midpoint.lon]} icon={midpointIcon(color)}>
+                    <Popup>
+                      <span className="font-medium">{hh.householdName}</span>
+                      <br />
+                      Midpoint between both workplaces
+                    </Popup>
+                  </Marker>
+                )}
+                {hh.spouse1Point && hh.midpoint && (
+                  <Polyline
+                    positions={[
+                      [hh.spouse1Point.lat, hh.spouse1Point.lon],
+                      [hh.midpoint.lat, hh.midpoint.lon],
+                    ]}
+                    pathOptions={{ color, weight: 2, dashArray: "4 4" }}
+                  />
+                )}
+                {hh.spouse2Point && hh.midpoint && (
+                  <Polyline
+                    positions={[
+                      [hh.spouse2Point.lat, hh.spouse2Point.lon],
+                      [hh.midpoint.lat, hh.midpoint.lon],
+                    ]}
+                    pathOptions={{ color, weight: 2, dashArray: "4 4" }}
+                  />
+                )}
+              </div>
+            );
+          })}
+        </MapContainer>
+      </div>
+
+      {hasMidpoints && (
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-1 px-1 text-xs text-stone-500">
+          <span className="flex items-center gap-1.5">
+            <span className="inline-block h-3 w-3 rounded-full bg-stone-600" />
+            Recommended area
+          </span>
+          <span className="flex items-center gap-1.5">
+            <span className="inline-block h-3 w-3 rounded-full bg-stone-400" />
+            Spouse workplace (S1/S2)
+          </span>
+          <span className="flex items-center gap-1.5">
+            <span className="inline-block h-2.5 w-2.5 rotate-45 bg-stone-400" />
+            Workplace midpoint
+          </span>
+          <span>Colors group each household&apos;s workplaces with its midpoint.</span>
+        </div>
+      )}
     </div>
   );
 }

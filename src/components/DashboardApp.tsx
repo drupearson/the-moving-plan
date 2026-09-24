@@ -213,6 +213,8 @@ function ResultsPanel({ result }: { result: AnalysisResult | null }) {
         </p>
       )}
 
+      <LocationsMap locations={sortedLocations} householdMidpoints={result.householdMidpoints} />
+
       {sortedLocations.length === 0 ? (
         <div className="rounded-2xl border border-dashed border-stone-300 bg-stone-50 px-6 py-12 text-center">
           <p className="text-sm text-stone-600">
@@ -224,14 +226,11 @@ function ResultsPanel({ result }: { result: AnalysisResult | null }) {
           </p>
         </div>
       ) : (
-        <>
-          <LocationsMap locations={sortedLocations} />
-          <div className="space-y-6">
-            {sortedLocations.map((location) => (
-              <LocationCard key={location.rank} location={location} />
-            ))}
-          </div>
-        </>
+        <div className="space-y-6">
+          {sortedLocations.map((location) => (
+            <LocationCard key={location.rank} location={location} />
+          ))}
+        </div>
       )}
     </div>
   );

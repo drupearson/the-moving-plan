@@ -3,6 +3,7 @@ import {
   AnalysisResult,
   CompatibilityLevel,
   HouseholdCompatibility,
+  HouseholdMidpoint,
   LocationRecommendation,
 } from "@/lib/anthropic/schema";
 import { geocodeLocation, GeoPoint } from "./geocode";
@@ -205,6 +206,23 @@ export async function enrichWithRealCommutes(
   const geocoded = await geocodeAll(spouseQueries);
   const lookup = (text: string) => geocoded.get(text.trim().toLowerCase()) ?? null;
 
+  // A plain geographic midpoint between each household's two spouse
+  // workplaces - unrelated to the AI's location recommendations, just reuses
+  // the geocoding already done above for commute times.
+  const householdMidpoints: HouseholdMidpoint[] = households.map((household) => {
+    const spouse1Point = household.spouse1Workplace.isUnknown
+      ? null
+      : lookup(household.spouse1Workplace.location);
+    const spouse2Point = household.spouse2Workplace.isUnknown
+      ? null
+      : lookup(household.spouse2Workplace.location);
+    const midpoint =
+      spouse1Point && spouse2Point
+        ? { lat: (spouse1Point.lat + spouse2Point.lat) / 2, lon: (spouse1Point.lon + spouse2Point.lon) / 2 }
+        : null;
+    return { householdId: household.id, householdName: household.name, spouse1Point, spouse2Point, midpoint };
+  });
+
   const householdsById = new Map(households.map((h) => [h.id, h]));
 
   const enrichedLocations: LocationRecommendation[] = [];
@@ -274,7 +292,7 @@ export async function enrichWithRealCommutes(
     });
   }
 
-  return { ...result, locations: enrichedLocations };
+  return { ...result, locations: enrichedLocations, householdMidpoints };
 }
 
 function exceedsHouseholdMax(row: HouseholdCompatibility, household: Household): boolean {

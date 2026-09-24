@@ -2,7 +2,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
 import { NextResponse } from "next/server";
 import { Household } from "@/types/household";
-import { analysisResultSchema } from "@/lib/anthropic/schema";
+import { AnalysisResult, analysisResultSchema } from "@/lib/anthropic/schema";
 import { ANALYSIS_SYSTEM_PROMPT, buildHouseholdsSummary } from "@/lib/anthropic/prompt";
 import { saveAnalysis } from "@/lib/supabase/server";
 import { enrichWithRealCommutes, selectTopLocations } from "@/lib/geo/commute";
@@ -105,7 +105,7 @@ export async function POST(request: Request) {
       );
     }
 
-    let result = parsed.data;
+    let result: AnalysisResult = parsed.data;
     try {
       result = await enrichWithRealCommutes(households, result);
       result = selectTopLocations(households, result);
