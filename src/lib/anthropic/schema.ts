@@ -36,21 +36,21 @@ export const householdBreakdownSchema = z.object({
   activityProximity: z.string(),
   budgetFit: z.string(),
   acreageFit: z.string(),
-  requirementsMet: z.array(z.string()).max(5),
-  requirementsCompromised: z.array(z.string()).max(5),
-  summary: z.string().max(240),
+  requirementsMet: z.array(z.string()),
+  requirementsCompromised: z.array(z.string()),
+  summary: z.string(),
 });
 
 export const locationRecommendationSchema = z.object({
-  rank: z.number().int().min(1).max(3),
+  rank: z.number().int().min(1).max(5),
   name: z.string(),
   cityArea: z.string(),
   county: z.string(),
-  summary: z.string().max(280),
-  keyFactors: z.array(z.string()).max(4),
-  housingConsiderations: z.string().max(280),
-  majorCompromises: z.array(z.string()).max(3),
-  dataCaveat: z.string().max(200),
+  summary: z.string(),
+  keyFactors: z.array(z.string()),
+  housingConsiderations: z.string(),
+  majorCompromises: z.array(z.string()),
+  dataCaveat: z.string(),
   familyCompatibility: z.array(householdCompatibilitySchema),
   familyBreakdowns: z.array(householdBreakdownSchema),
   // Filled in server-side after geocoding; the model never sets these.
@@ -61,8 +61,14 @@ export const locationRecommendationSchema = z.object({
 });
 
 export const analysisResultSchema = z.object({
-  locations: z.array(locationRecommendationSchema).length(3),
-  overallNotes: z.string().max(360),
+  // The model is asked for 5 candidates (tolerate a few more/fewer so a minor
+  // miscount doesn't fail the whole request); the server then drops any that
+  // violate a household's stated maximum commute and returns up to 3 that pass.
+  locations: z.array(locationRecommendationSchema).min(3).max(7),
+  overallNotes: z.string(),
+  // Filled in server-side when candidates were dropped for exceeding a
+  // household's stated maximum commute; the model never sets this.
+  excludedForCommute: z.number().int().nullable().optional(),
 });
 
 export type CompatibilityLevel = z.infer<typeof compatibilityLevelSchema>;

@@ -1,5 +1,10 @@
 import { Household } from "@/types/household";
-import { AnalysisResult, CompatibilityLevel, LocationRecommendation } from "@/lib/anthropic/schema";
+import {
+  AnalysisResult,
+  CompatibilityLevel,
+  HouseholdCompatibility,
+  LocationRecommendation,
+} from "@/lib/anthropic/schema";
 import { geocodeLocation, GeoPoint } from "./geocode";
 import { getDrivingInfo, DriveInfo } from "./route";
 
@@ -65,10 +70,20 @@ function dedupeByHouseholdId<T extends { householdId: string }>(items: T[]): T[]
  * calls will hit it, so we pace every call the same way.
  */
 async function geocodeAll(queries: string[]): Promise<Map<string, GeoPoint | null>> {
-  const unique = [...new Set(queries.map((q) => q.trim().toLowerCase()).filter(Boolean))];
+  // Lowercased text is only for map-key dedup (matching how callers look
+  // results up); the ORIGINAL casing must reach the geocoder itself, or
+  // abbreviation expansion ("OU" -> "University of Oklahoma") silently
+  // breaks since it's a case-sensitive match against a now-lowercased string.
+  const byKey = new Map<string, string>();
+  for (const q of queries) {
+    const trimmed = q.trim();
+    if (!trimmed) continue;
+    const key = trimmed.toLowerCase();
+    if (!byKey.has(key)) byKey.set(key, trimmed);
+  }
   const results = new Map<string, GeoPoint | null>();
-  for (const query of unique) {
-    results.set(query, await geocodeLocation(query));
+  for (const [key, original] of byKey) {
+    results.set(key, await geocodeLocation(original));
     await sleep(1100);
   }
   return results;
@@ -223,11 +238,22 @@ export async function enrichWithRealCommutes(
       const spouse1 = await driveFor(household.spouse1Workplace);
       const spouse2 = await driveFor(household.spouse2Workplace);
 
-      const computedLevels = [spouse1.level, spouse2.level].filter(
-        (l): l is CompatibilityLevel => l !== null,
-      );
+      // Only override the model's own guess once we have at least one spouse
+      // with real, computed drive data - a spouse that's genuinely blank
+      // ("Unknown / N/A") contributes "unknown" too, but must not be allowed
+      // to drag the whole household to "unknown" on its own when the OTHER
+      // spouse's location WAS provided and simply failed to geocode. In that
+      // case there's no real data at all, so keep the model's guess as-is
+      // rather than claiming "unknown" for a field that had a value.
+      const realLevels = [spouse1, spouse2]
+        .filter((s) => s.drive !== null)
+        .map((s) => s.level)
+        .filter((l): l is CompatibilityLevel => l !== null);
+      const blankLevels: CompatibilityLevel[] = [spouse1, spouse2]
+        .filter((s) => s.drive === null && s.level === "unknown")
+        .map(() => "unknown");
       const workplaceCommute =
-        computedLevels.length > 0 ? combineLevels(computedLevels) : row.workplaceCommute;
+        realLevels.length > 0 ? combineLevels([...realLevels, ...blankLevels]) : row.workplaceCommute;
 
       enrichedCompatibility.push({
         ...row,
@@ -249,4 +275,56 @@ export async function enrichWithRealCommutes(
   }
 
   return { ...result, locations: enrichedLocations };
+}
+
+function exceedsHouseholdMax(row: HouseholdCompatibility, household: Household): boolean {
+  const max = parseMinutes(household.housing.maxCommute);
+  if (max === null) return false; // no stated cap - nothing to violate
+  return (
+    (row.spouse1DriveMinutes != null && row.spouse1DriveMinutes > max) ||
+    (row.spouse2DriveMinutes != null && row.spouse2DriveMinutes > max)
+  );
+}
+
+// Drops any location where a real (not AI-guessed) drive time exceeds a
+// household's stated maximum commute for that household, then picks up to 3
+// of the survivors - preferring locations in different cities before
+// resorting to a second one in the same city, so "top 3" doesn't collapse
+// into 3 neighborhoods of a single town.
+export function selectTopLocations(households: Household[], result: AnalysisResult): AnalysisResult {
+  const householdsById = new Map(households.map((h) => [h.id, h]));
+
+  const violatesSomeonesMax = (loc: LocationRecommendation) =>
+    loc.familyCompatibility.some((row) => {
+      const household = householdsById.get(row.householdId);
+      return household ? exceedsHouseholdMax(row, household) : false;
+    });
+
+  const sorted = [...result.locations].sort((a, b) => a.rank - b.rank);
+  const compliant = sorted.filter((loc) => !violatesSomeonesMax(loc));
+  const excludedForCommute = sorted.length - compliant.length;
+
+  const cityKey = (loc: LocationRecommendation) => loc.cityArea.trim().toLowerCase();
+  const picked: LocationRecommendation[] = [];
+  const usedCities = new Set<string>();
+
+  for (const loc of compliant) {
+    if (picked.length >= 3) break;
+    if (!usedCities.has(cityKey(loc))) {
+      picked.push(loc);
+      usedCities.add(cityKey(loc));
+    }
+  }
+  if (picked.length < 3) {
+    for (const loc of compliant) {
+      if (picked.length >= 3) break;
+      if (!picked.includes(loc)) picked.push(loc);
+    }
+  }
+
+  return {
+    ...result,
+    locations: picked.map((loc, i) => ({ ...loc, rank: i + 1 })),
+    excludedForCommute,
+  };
 }

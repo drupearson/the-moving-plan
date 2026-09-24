@@ -63,6 +63,16 @@ interface NominatimResult {
   display_name?: string;
 }
 
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+// The public Nominatim instance rate-limits by IP; a 429 (or other transient
+// failure) looks identical to "no results" unless handled separately, which
+// would silently fall through to a worse candidate or a null result. Retry
+// with increasing backoff before giving up on this candidate.
+const RETRY_BACKOFF_MS = [1500, 3000, 5000];
+
 async function queryNominatim(query: string): Promise<NominatimResult[]> {
   const params = new URLSearchParams({
     format: "jsonv2",
@@ -71,11 +81,30 @@ async function queryNominatim(query: string): Promise<NominatimResult[]> {
     viewbox: OKC_VIEWBOX,
     q: query,
   });
-  const res = await fetch(`${NOMINATIM_URL}?${params.toString()}`, {
-    headers: { "User-Agent": USER_AGENT },
-  });
-  if (!res.ok) return [];
-  return (await res.json()) as NominatimResult[];
+  const url = `${NOMINATIM_URL}?${params.toString()}`;
+
+  for (let attempt = 0; attempt <= RETRY_BACKOFF_MS.length; attempt++) {
+    let res: Response;
+    try {
+      res = await fetch(url, { headers: { "User-Agent": USER_AGENT } });
+    } catch (err) {
+      console.error(`Nominatim fetch threw for "${query}":`, err);
+      if (attempt === RETRY_BACKOFF_MS.length) return [];
+      await sleep(RETRY_BACKOFF_MS[attempt]);
+      continue;
+    }
+    if (res.ok) return (await res.json()) as NominatimResult[];
+    if (res.status !== 429 && res.status < 500) {
+      console.error(`Nominatim returned ${res.status} for "${query}" (not retrying)`);
+      return [];
+    }
+    if (attempt === RETRY_BACKOFF_MS.length) {
+      console.error(`Nominatim still failing (${res.status}) for "${query}" after retries`);
+      return [];
+    }
+    await sleep(RETRY_BACKOFF_MS[attempt]);
+  }
+  return [];
 }
 
 // Nominatim's own ordering already weighs text relevance against the query,
@@ -98,6 +127,31 @@ function extractParenthetical(text: string): string | null {
 
 function stripParenthetical(text: string): string {
   return text.replace(/\([^)]*\)/g, "").trim();
+}
+
+const ABBREVIATIONS: [RegExp, string][] = [
+  [/\bOU\b/gi, "University of Oklahoma"],
+  [/\bOSU\b/gi, "Oklahoma State University"],
+  [/\bUCO\b/gi, "University of Central Oklahoma"],
+  [/\bAFB\b/gi, "Air Force Base"],
+];
+
+// Nominatim's plain-text search returns zero results (not just a bad match)
+// when the query includes conversational filler - "near", "around", "the",
+// trailing "area"/"side of the metro" - rather than ignoring those words, so
+// strip them before searching. Also expand common local abbreviations it
+// doesn't recognize (e.g. "OU" as a bare word never matches "University of
+// Oklahoma").
+function cleanDescriptiveText(text: string): string {
+  let cleaned = text
+    .replace(/^\s*(near|around|close to|next to|by)\s+/i, "")
+    .replace(/^\s*the\s+/i, "")
+    .replace(/\s+(area|vicinity|side of the metro|side)\s*$/i, "")
+    .trim();
+  for (const [pattern, replacement] of ABBREVIATIONS) {
+    cleaned = cleaned.replace(pattern, replacement);
+  }
+  return cleaned.trim();
 }
 
 // Tries the parenthetical landmark/employer name before the full string - vague
@@ -124,6 +178,10 @@ export async function geocodeLocation(rawText: string): Promise<GeoPoint | null>
   const stripped = stripParenthetical(text);
   if (stripped && stripped !== text) {
     candidates.push(/oklahoma/i.test(stripped) ? stripped : `${stripped}, Oklahoma`);
+  }
+  const cleaned = cleanDescriptiveText(stripped || text);
+  if (cleaned && cleaned !== stripped && cleaned !== text) {
+    candidates.push(/oklahoma/i.test(cleaned) ? cleaned : `${cleaned}, Oklahoma`);
   }
 
   for (const candidate of candidates) {

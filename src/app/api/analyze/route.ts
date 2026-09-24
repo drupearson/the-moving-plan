@@ -5,7 +5,7 @@ import { Household } from "@/types/household";
 import { analysisResultSchema } from "@/lib/anthropic/schema";
 import { ANALYSIS_SYSTEM_PROMPT, buildHouseholdsSummary } from "@/lib/anthropic/prompt";
 import { saveAnalysis } from "@/lib/supabase/server";
-import { enrichWithRealCommutes } from "@/lib/geo/commute";
+import { enrichWithRealCommutes, selectTopLocations } from "@/lib/geo/commute";
 
 export const dynamic = "force-dynamic";
 // Structured, multi-household analysis can run for a couple of minutes.
@@ -44,7 +44,7 @@ export async function POST(request: Request) {
   try {
     const stream = client.messages.stream({
       model: "claude-opus-5",
-      max_tokens: 32000,
+      max_tokens: 48000,
       output_config: {
         format: zodOutputFormat(analysisResultSchema),
         effort: "medium",
@@ -108,6 +108,7 @@ export async function POST(request: Request) {
     let result = parsed.data;
     try {
       result = await enrichWithRealCommutes(households, result);
+      result = selectTopLocations(households, result);
     } catch (enrichError) {
       console.error("Commute enrichment failed, using AI's qualitative estimates:", enrichError);
     }

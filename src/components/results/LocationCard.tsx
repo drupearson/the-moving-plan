@@ -8,6 +8,15 @@ function zillowSearchUrl(location: LocationRecommendation): string {
   return `https://www.zillow.com/homes/${query}_rb/`;
 }
 
+// Google search rather than a guessed real-estate-site URL: it aggregates
+// listings from LandWatch, Land.com, realtor.com, and others, so it holds up
+// without depending on any one site's internal (and sometimes unreliable)
+// filter/URL scheme.
+function landSearchUrl(location: LocationRecommendation): string {
+  const query = encodeURIComponent(`land for sale acreage ${location.cityArea} OK`);
+  return `https://www.google.com/search?q=${query}`;
+}
+
 export function LocationCard({ location }: { location: LocationRecommendation }) {
   const isTopPick = location.rank === 1;
   const compatibilityByHousehold = new Map(
@@ -61,25 +70,30 @@ export function LocationCard({ location }: { location: LocationRecommendation })
         <div className="grid gap-5 sm:grid-cols-2">
           {location.housingConsiderations.trim() && (
             <div>
-              <div className="flex items-center justify-between gap-2">
-                <p className="text-xs font-medium uppercase tracking-wide text-stone-400">
-                  Housing &amp; acreage
-                </p>
+              <p className="text-xs font-medium uppercase tracking-wide text-stone-400">
+                Housing &amp; acreage
+              </p>
+              <p className="mt-1 text-sm text-stone-700">{location.housingConsiderations}</p>
+              <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1">
                 <a
                   href={zillowSearchUrl(location)}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="flex shrink-0 items-center gap-1 text-xs font-medium text-emerald-700 hover:text-emerald-800"
                 >
-                  See current listings
+                  See home listings
+                  <ExternalLink className="h-3 w-3" />
+                </a>
+                <a
+                  href={landSearchUrl(location)}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex shrink-0 items-center gap-1 text-xs font-medium text-emerald-700 hover:text-emerald-800"
+                >
+                  Search land for sale
                   <ExternalLink className="h-3 w-3" />
                 </a>
               </div>
-              <p className="mt-1 text-sm text-stone-700">{location.housingConsiderations}</p>
-              <p className="mt-1 text-xs text-stone-400">
-                For land/lot-only results, use Zillow&apos;s own property-type filter once there -
-                a reliable direct link isn&apos;t available.
-              </p>
             </div>
           )}
           {location.majorCompromises.length > 0 && (

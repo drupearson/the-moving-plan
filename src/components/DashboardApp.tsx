@@ -131,9 +131,9 @@ function AnalysisPanel({
         <h2 className="text-lg font-semibold text-stone-900">AI Location Analysis</h2>
         <p className="mt-1 max-w-2xl text-sm text-stone-500">
           Claude will review all {households.length} household
-          {households.length === 1 ? "" : "s"} and recommend five areas of the Oklahoma City
-          metro that best balance everyone&apos;s commutes, schools, family, activities, and
-          budgets.
+          {households.length === 1 ? "" : "s"}, check real driving times against each
+          household&apos;s maximum commute, and recommend up to 3 areas of the Oklahoma City metro
+          that best balance everyone&apos;s commutes, schools, family, activities, and budgets.
         </p>
       </div>
 
@@ -193,6 +193,7 @@ function ResultsPanel({ result }: { result: AnalysisResult | null }) {
   }
 
   const sortedLocations = [...result.locations].sort((a, b) => a.rank - b.rank);
+  const excludedForCommute = result.excludedForCommute ?? 0;
 
   return (
     <div className="space-y-6">
@@ -204,13 +205,34 @@ function ResultsPanel({ result }: { result: AnalysisResult | null }) {
         {result.overallNotes}
       </p>
 
-      <LocationsMap locations={sortedLocations} />
+      {excludedForCommute > 0 && (
+        <p className="rounded-xl border border-amber-100 bg-amber-50/60 px-4 py-3 text-sm leading-snug text-amber-900">
+          {excludedForCommute} candidate area{excludedForCommute === 1 ? "" : "s"} exceeded a
+          household&apos;s stated maximum commute and{" "}
+          {excludedForCommute === 1 ? "was" : "were"} left out of the results below.
+        </p>
+      )}
 
-      <div className="space-y-6">
-        {sortedLocations.map((location) => (
-          <LocationCard key={location.rank} location={location} />
-        ))}
-      </div>
+      {sortedLocations.length === 0 ? (
+        <div className="rounded-2xl border border-dashed border-stone-300 bg-stone-50 px-6 py-12 text-center">
+          <p className="text-sm text-stone-600">
+            No candidate area satisfied every household&apos;s maximum commute at the same time.
+          </p>
+          <p className="mx-auto mt-1 max-w-md text-xs text-stone-400">
+            Try raising a household&apos;s maximum acceptable commute on the Family Profiles tab,
+            or relax which workplaces are marked essential, then re-run the analysis.
+          </p>
+        </div>
+      ) : (
+        <>
+          <LocationsMap locations={sortedLocations} />
+          <div className="space-y-6">
+            {sortedLocations.map((location) => (
+              <LocationCard key={location.rank} location={location} />
+            ))}
+          </div>
+        </>
+      )}
     </div>
   );
 }
