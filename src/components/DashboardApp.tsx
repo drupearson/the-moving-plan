@@ -1,10 +1,20 @@
 "use client";
 
 import { useState } from "react";
+import dynamic from "next/dynamic";
 import { Household } from "@/types/household";
 import { AnalysisResult } from "@/lib/anthropic/schema";
 import { HouseholdsSection } from "./HouseholdsSection";
 import { LocationCard } from "./results/LocationCard";
+
+const LocationsMap = dynamic(() => import("./results/LocationsMap"), {
+  ssr: false,
+  loading: () => (
+    <div className="flex h-80 items-center justify-center rounded-2xl border border-stone-200 bg-stone-50 text-sm text-stone-400">
+      Loading map…
+    </div>
+  ),
+});
 
 type Tab = "profiles" | "analysis" | "results";
 
@@ -186,10 +196,16 @@ function ResultsPanel({ result }: { result: AnalysisResult | null }) {
 
   return (
     <div className="space-y-6">
-      <div>
+      <div className="flex items-start justify-between gap-4">
         <h2 className="text-lg font-semibold text-stone-900">Recommended Locations</h2>
-        <p className="mt-1 max-w-3xl text-sm text-stone-500">{result.overallNotes}</p>
       </div>
+
+      <p className="rounded-xl border border-emerald-100 bg-emerald-50/60 px-4 py-3 text-sm leading-snug text-emerald-900">
+        {result.overallNotes}
+      </p>
+
+      <LocationsMap locations={sortedLocations} />
+
       <div className="space-y-6">
         {sortedLocations.map((location) => (
           <LocationCard key={location.rank} location={location} />

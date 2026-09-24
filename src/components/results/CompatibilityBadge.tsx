@@ -14,12 +14,21 @@ const LABELS: Record<CompatibilityLevel, string> = {
   unknown: "Unknown",
 };
 
-export function CompatibilityBadge({ level }: { level: CompatibilityLevel }) {
+export function CompatibilityBadge({
+  level,
+  detail,
+}: {
+  level: CompatibilityLevel;
+  detail?: string;
+}) {
   return (
-    <span
-      className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-medium whitespace-nowrap ${STYLES[level]}`}
-    >
-      {LABELS[level]}
-    </span>
+    <div className="flex flex-col gap-0.5">
+      <span
+        className={`inline-flex w-fit items-center rounded-full px-2.5 py-1 text-xs font-medium whitespace-nowrap ${STYLES[level]}`}
+      >
+        {LABELS[level]}
+      </span>
+      {detail && <span className="text-xs text-stone-400">{detail}</span>}
+    </div>
   );
 }

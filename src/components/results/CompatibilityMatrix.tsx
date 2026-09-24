@@ -1,6 +1,17 @@
 import { HouseholdCompatibility } from "@/lib/anthropic/schema";
 import { CompatibilityBadge } from "./CompatibilityBadge";
 
+function commuteDetail(row: HouseholdCompatibility): string | undefined {
+  const parts: string[] = [];
+  if (row.spouse1DriveMinutes != null) {
+    parts.push(`S1: ${row.spouse1DriveMinutes} min / ${row.spouse1DriveMiles} mi`);
+  }
+  if (row.spouse2DriveMinutes != null) {
+    parts.push(`S2: ${row.spouse2DriveMinutes} min / ${row.spouse2DriveMiles} mi`);
+  }
+  return parts.length > 0 ? parts.join(" · ") : undefined;
+}
+
 type CompatibilityColumnKey =
   | "workplaceCommute"
   | "schoolActivityProximity"
@@ -36,7 +47,10 @@ export function CompatibilityMatrix({ rows }: { rows: HouseholdCompatibility[] }
               <td className="px-3 py-2.5 font-medium text-stone-800">{row.householdName}</td>
               {COLUMNS.map((col) => (
                 <td key={col.key} className="px-3 py-2.5">
-                  <CompatibilityBadge level={row[col.key]} />
+                  <CompatibilityBadge
+                    level={row[col.key]}
+                    detail={col.key === "workplaceCommute" ? commuteDetail(row) : undefined}
+                  />
                 </td>
               ))}
             </tr>

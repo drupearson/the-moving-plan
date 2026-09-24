@@ -5,6 +5,7 @@ import { Household } from "@/types/household";
 import { analysisResultSchema } from "@/lib/anthropic/schema";
 import { ANALYSIS_SYSTEM_PROMPT, buildHouseholdsSummary } from "@/lib/anthropic/prompt";
 import { saveAnalysis } from "@/lib/supabase/server";
+import { enrichWithRealCommutes } from "@/lib/geo/commute";
 
 export const dynamic = "force-dynamic";
 // Structured, multi-household analysis can run for a couple of minutes.
@@ -104,7 +105,12 @@ export async function POST(request: Request) {
       );
     }
 
-    const result = parsed.data;
+    let result = parsed.data;
+    try {
+      result = await enrichWithRealCommutes(households, result);
+    } catch (enrichError) {
+      console.error("Commute enrichment failed, using AI's qualitative estimates:", enrichError);
+    }
 
     await saveAnalysis({
       householdSnapshot: households,
