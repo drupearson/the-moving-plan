@@ -3,7 +3,6 @@ import {
   AnalysisResult,
   CompatibilityLevel,
   HouseholdCompatibility,
-  HouseholdWorkplaces,
   LocationRecommendation,
 } from "@/lib/anthropic/schema";
 import { geocodeLocation, GeoPoint } from "./geocode";
@@ -206,32 +205,6 @@ export async function enrichWithRealCommutes(
   const geocoded = await geocodeAll(spouseQueries);
   const lookup = (text: string) => geocoded.get(text.trim().toLowerCase()) ?? null;
 
-  // Every spouse workplace pin, grouped by household for coloring - unrelated
-  // to the AI's location recommendations, just reuses the geocoding already
-  // done above for commute times.
-  const householdWorkplaces: HouseholdWorkplaces[] = households.map((household) => {
-    const spouse1Point = household.spouse1Workplace.isUnknown
-      ? null
-      : lookup(household.spouse1Workplace.location);
-    const spouse2Point = household.spouse2Workplace.isUnknown
-      ? null
-      : lookup(household.spouse2Workplace.location);
-    return { householdId: household.id, householdName: household.name, spouse1Point, spouse2Point };
-  });
-
-  // ONE combined midpoint across every spouse workplace from every household
-  // - not one per household.
-  const allSpousePoints: GeoPoint[] = householdWorkplaces.flatMap((hh) =>
-    [hh.spouse1Point, hh.spouse2Point].filter((p): p is GeoPoint => p !== null),
-  );
-  const combinedWorkplaceMidpoint: GeoPoint | null =
-    allSpousePoints.length > 0
-      ? {
-          lat: allSpousePoints.reduce((sum, p) => sum + p.lat, 0) / allSpousePoints.length,
-          lon: allSpousePoints.reduce((sum, p) => sum + p.lon, 0) / allSpousePoints.length,
-        }
-      : null;
-
   const householdsById = new Map(households.map((h) => [h.id, h]));
 
   const enrichedLocations: LocationRecommendation[] = [];
@@ -301,7 +274,7 @@ export async function enrichWithRealCommutes(
     });
   }
 
-  return { ...result, locations: enrichedLocations, householdWorkplaces, combinedWorkplaceMidpoint };
+  return { ...result, locations: enrichedLocations };
 }
 
 function exceedsHouseholdMax(row: HouseholdCompatibility, household: Household): boolean {

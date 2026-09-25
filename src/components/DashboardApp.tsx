@@ -213,11 +213,7 @@ function ResultsPanel({ result }: { result: AnalysisResult | null }) {
         </p>
       )}
 
-      <LocationsMap
-        locations={sortedLocations}
-        householdWorkplaces={result.householdWorkplaces}
-        combinedWorkplaceMidpoint={result.combinedWorkplaceMidpoint}
-      />
+      <LocationsMap locations={sortedLocations} />
 
       {sortedLocations.length === 0 ? (
         <div className="rounded-2xl border border-dashed border-stone-300 bg-stone-50 px-6 py-12 text-center">

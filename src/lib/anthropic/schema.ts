@@ -74,35 +74,14 @@ export const analysisResultSchema = z.object({
   overallNotes: z.string(),
 });
 
-interface GeoPoint {
-  lat: number;
-  lon: number;
-}
-
-// Every spouse workplace pin for one household - a plain geocoding result,
-// unrelated to the AI's location recommendations. Filled in server-side from
-// the same geocoding already done for commute times; the model never sets
-// this, so it's not part of analysisResultSchema above.
-export interface HouseholdWorkplaces {
-  householdId: string;
-  householdName: string;
-  spouse1Point: GeoPoint | null;
-  spouse2Point: GeoPoint | null;
-}
-
 export type CompatibilityLevel = z.infer<typeof compatibilityLevelSchema>;
 export type HouseholdCompatibility = z.infer<typeof householdCompatibilitySchema>;
 export type HouseholdBreakdown = z.infer<typeof householdBreakdownSchema>;
 export type LocationRecommendation = z.infer<typeof locationRecommendationSchema>;
 
-// The model only produces analysisResultSchema's shape; everything below is
-// added server-side afterward (see selectTopLocations / enrichWithRealCommutes)
-// and was never part of the schema Claude had to satisfy.
+// The model only produces analysisResultSchema's shape; excludedForCommute is
+// added server-side afterward (see selectTopLocations) and was never part of
+// the schema Claude had to satisfy.
 export type AnalysisResult = z.infer<typeof analysisResultSchema> & {
   excludedForCommute?: number | null;
-  // Every spouse workplace, grouped by household for pin coloring.
-  householdWorkplaces?: HouseholdWorkplaces[] | null;
-  // ONE combined midpoint across every spouse workplace from every
-  // household - not one per household.
-  combinedWorkplaceMidpoint?: GeoPoint | null;
 };
